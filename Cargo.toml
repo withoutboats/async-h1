@@ -22,6 +22,10 @@ lazy_static = "1.4.0"
 futures-core = "0.3.1"
 log = "0.4"
 
+[dependencies.ringbahn]
+git = "https://github.com/withoutboats/ringbahn"
+branch = "ring-version2"
+
 [dev-dependencies]
 pretty_assertions = "0.6.1"
 async-std = { version = "1.4.0", features = ["unstable", "attributes"] }

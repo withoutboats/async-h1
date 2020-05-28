@@ -1,10 +1,10 @@
-use async_std::fs::File;
-use async_std::io::{self, Read, SeekFrom, Write};
+use async_std::io::{self, Read, Write};
 use async_std::path::PathBuf;
 use async_std::sync::Arc;
 use async_std::task::{Context, Poll};
 use std::pin::Pin;
 use std::sync::Mutex;
+use ringbahn::File;
 
 #[derive(Debug, Copy, Clone)]
 #[allow(dead_code)]
@@ -16,7 +16,7 @@ enum Direction {
 #[derive(Clone)]
 pub struct TestCase {
     direction: Direction,
-    source_fixture: Arc<File>,
+    source_fixture: Arc<Mutex<File>>,
     expected_fixture: Arc<Mutex<File>>,
     result: Arc<Mutex<File>>,
 }
@@ -37,8 +37,7 @@ impl TestCase {
         request_file_path: &str,
         response_file_path: &str,
     ) -> TestCase {
-        let request_fixture = File::open(fixture_path(&request_file_path))
-            .await
+        let request_fixture = File::open(fixture_path(&request_file_path)).await
             .unwrap_or_else(|_| {
                 panic!(
                     "Could not open request fixture file: {:?}",
@@ -46,8 +45,7 @@ impl TestCase {
                 )
             });
 
-        let response_fixture = File::open(fixture_path(&response_file_path))
-            .await
+        let response_fixture = File::open(fixture_path(&response_file_path)).await
             .unwrap_or_else(|_| {
                 panic!(
                     "Could not open response fixture file: {:?}",
@@ -65,7 +63,7 @@ impl TestCase {
 
         TestCase {
             direction,
-            source_fixture: Arc::new(source_fixture),
+            source_fixture: Arc::new(Mutex::new(source_fixture)),
             expected_fixture: Arc::new(Mutex::new(expected_fixture)),
             result,
         }
@@ -76,7 +74,7 @@ impl TestCase {
         use async_std::prelude::*;
         let mut result = String::new();
         let mut file = self.result.lock().unwrap();
-        file.seek(SeekFrom::Start(0)).await.unwrap();
+        file.seek(async_std::io::SeekFrom::Start(0)).await.unwrap();
         file.read_to_string(&mut result).await.unwrap();
         result
     }
@@ -128,24 +126,24 @@ pub(crate) fn munge_date(actual: &mut String, expected: &mut String) {
 
 impl Read for TestCase {
     fn poll_read(
-        self: Pin<&mut Self>,
+        mut self: Pin<&mut Self>,
         cx: &mut Context,
         buf: &mut [u8],
     ) -> Poll<io::Result<usize>> {
-        Pin::new(&mut &*self.source_fixture).poll_read(cx, buf)
+        Pin::new(&mut *self.source_fixture.lock().unwrap()).poll_read(cx, buf)
     }
 }
 
 impl Write for TestCase {
-    fn poll_write(self: Pin<&mut Self>, cx: &mut Context, buf: &[u8]) -> Poll<io::Result<usize>> {
-        Pin::new(&mut &*self.result.lock().unwrap()).poll_write(cx, buf)
+    fn poll_write(mut self: Pin<&mut Self>, cx: &mut Context, buf: &[u8]) -> Poll<io::Result<usize>> {
+        Pin::new(&mut *self.result.lock().unwrap()).poll_write(cx, buf)
     }
 
-    fn poll_flush(self: Pin<&mut Self>, cx: &mut Context) -> Poll<io::Result<()>> {
-        Pin::new(&mut &*self.result.lock().unwrap()).poll_flush(cx)
+    fn poll_flush(mut self: Pin<&mut Self>, cx: &mut Context) -> Poll<io::Result<()>> {
+        Pin::new(&mut *self.result.lock().unwrap()).poll_flush(cx)
     }
 
-    fn poll_close(self: Pin<&mut Self>, cx: &mut Context) -> Poll<io::Result<()>> {
-        Pin::new(&mut &*self.result.lock().unwrap()).poll_close(cx)
+    fn poll_close(mut self: Pin<&mut Self>, cx: &mut Context) -> Poll<io::Result<()>> {
+        Pin::new(&mut *self.result.lock().unwrap()).poll_close(cx)
     }
 }
